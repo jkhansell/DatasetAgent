@@ -1,0 +1,28 @@
+[project]
+name = "datasetagent"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "beautifulsoup4>=4.14.3",
+    "langchain>=1.2.15",
+    "langchain-experimental>=0.4.1",
+    "langchain-google-genai>=4.2.1",
+    "langchain-google-vertexai>=3.2.2",
+    "langchain-mcp-adapters>=0.2.2",
+    "langchain-openai>=1.1.12",
+    "langchain-tavily>=0.2.17",
+    "langchain-text-splitters>=1.1.1",
+    "langgraph>=1.1.6",
+    "langgraph-api>=0.7.100",
+    "langgraph-cli>=0.4.21",
+    "mcp>=1.27.0",
+    "pypdf>=6.10.0",
+    "python-dotenv>=1.2.2",
+    "pyyaml>=6.0.3",
+    "scrapy>=2.15.0",
+    "tavily>=1.1.0",
+    "tavily-python>=0.7.23",
+    "transformers==5.5.0",
+]
