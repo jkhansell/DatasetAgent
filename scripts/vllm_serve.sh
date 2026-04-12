@@ -1,6 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
+
 export ROOT=$(git rev-parse --show-toplevel)
 
 source $ROOT/.env
@@ -90,7 +91,7 @@ start_process() {
 
 stop_all() {
   echo "Stopping all services..."
-  pkill -u jovillalobos
+  pkill -u $(whoami)
   echo "All services stopped."
 }
 

@@ -14,7 +14,13 @@ DatasetAgent is a generic agentic workflow designed for automated data discovery
 
 This project uses `uv` for lightning-fast dependency management.
 
-1. **Install Core Dependencies**:
+1. **Environment Setup**:
+   Copy the environment template and fill in your API keys (e.g., TAVILY_API_KEY):
+   ```bash
+   cp env_template .env
+   ```
+
+2. **Install Core Dependencies**:
    ```bash
    uv sync
    ```
