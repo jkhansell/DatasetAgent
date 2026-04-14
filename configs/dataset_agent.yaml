@@ -3,9 +3,16 @@ llm:
   model_name: "gemma4-agent"
   temperature: 0.3
 
-target_sources: 16
+target_sources: 10
 max_steps: 50
+confidence_threshold: 0.7
+max_rescrape: 2
+excluded_domains: ["github.com"]
+excluded_extensions: [".pdf", ".jpg", ".png", ".jpeg", ".mp4", ".doc", ".docx"]
 
+
+# it is crucial to keep the variables within the curly braces {vars} as these use runtime 
+# variables to limit the search of the model.
 prompts:
   discovery: |
     ROLE:
@@ -20,6 +27,9 @@ prompts:
     RULES:
     - Use search_datasets to find dataset URLs and metadata
     - Avoid duplicates from provided context
+    - PROHIBITED DOMAINS: Never include results from GitHub (github.com) or other excluded domains provided in the context.
+    - NO PDFs: Strictly avoid and ignore any links ending in .pdf. We only want structured data sources (landing pages, repositories, direct file links like .zip/.csv).
+    - REACH DEEPER: If you find a landing page, check the tool output (text and links) for "Download", "Repo", "GitHub", or "Data" links. Return the URL that leads closest to the actual data.
     - Never hallucinate URLs, datasets, or statistics
     - Only trust tool outputs
     - If uncertain, use tools instead of reasoning
@@ -37,7 +47,9 @@ prompts:
         {urls}
     And avoid these already seen/candidate URLs:
         {candidate_urls}
-    ALWAYS Scrape URLs to search for the following fields: {db_string} in the page and extract as much info as possible. Use WBC_* for iid.
+    Exclude these domains from your search: {excluded_domains}
+    
+    ALWAYS Scrape URLs to search for the following fields: {db_string} in the page and extract as much info as possible. Use WBC_(:03d) for iid.
 
   summary: |
     ROLE:
@@ -53,7 +65,6 @@ prompts:
 
     RULES:
     - DO NOT invent data; only summarize what is present in the JSON.
-    - Group datasets by "Type" (e.g., CSV, API, SQL) or "Source."
     - Identify the top 3 most relevant datasets based on metadata completeness and update frequency.
     - Keep the summary professional and scannable.
 
@@ -69,4 +80,80 @@ prompts:
     {sources}
 
     Please provide a comprehensive summary per dataset showcasing key features make a comprehensive table. Include the URLs for revision 
-    Write to a file under $git_root/data/summary.md.
+    Write to a file under "git repo root"/data/summary.md.
+
+  classify: |
+    ROLE:
+    You are a source classification expert. Your goal is to determine how a dataset can be programmatically downloaded.
+
+    CONTEXT:
+    You will be given a URL, title, and description of a discovered dataset.
+    Identify the repository type and the specific handle/identifier needed for our tools.
+
+    RULES:
+    - TYPES: 
+        - 'kaggle': Needs a handle like 'user/dataset-name'.
+        - 'github': Needs the full repository URL.
+        - 'huggingface': Needs a repo ID like 'user/dataset'.
+        - 'direct_link': Needs the direct URL to a .zip, .csv, .tar.gz, etc.
+        - 'none': If it's not a dataset or not downloadable.
+    - If you are unsure, provide your best guess but lower the confidence score.
+
+  classify_human: |
+    Classify the following discovered sources for programmatic download:
+    {sources}
+
+  download: |
+    ROLE:
+    You are an expert Download Engineer. Your goal is to figure out the best way to download a dataset and write robust code to perform the task.
+
+    TASK:
+    1. FIGURE OUT: Use `scrape_website` to find direct download links, API documentation, or repository instructions if the provided info is insufficient.
+    2. WRITE CODE: Generate a Python or Bash script that handles the entire download process.
+       - Use `kaggle`, `git`, `wget`, `curl`, or Python libraries like `requests`, `huggingface_hub`, `kagglehub`.
+       - The script should create necessary directories, download the files, and verify integrity if possible.
+    3. EXECUTE: Use `run_shell` to write the script to a file and then execute it.
+    4. POST-PROCESS: Ensure the script or additional commands handle unzipping/untaring and organize the files into the target directory.
+
+    RULES:
+    - ALWAYS download to the specific directory provided in the human message.
+    - Be autonomous: if one method fails (e.g., `wget` fails), try another (e.g., writing a Python script with `requests`).
+    - Return a clear breakdown of what you did, the code you wrote, and the final local path confirmed by file existence check.
+    - If you need credentials for Kaggle or HF, assume they are already configured in the environment.
+
+    Example workflow:
+    - `cat <<EOF > download.py ... EOF`
+    - `python3 download.py`
+    - Verify files exist.
+
+  download_human: |
+    Attempt to download the following classified sources:
+    {classifications}
+
+  rescrape: |
+    ROLE:
+    You are a dataset characterization expert operating within a discovery system.
+
+    CONTEXT:
+    A website was previously scraped, but the metadata extraction was poor or low confidence. 
+    You are provided with a more complete scrape of the website text.
+
+    TASK:
+    Synthesize the website text to extract a high-quality, structured DatasetEntry.
+    Focus on title, description, task, annotation type, number of images, and repository type.
+    CRITICAL: Search for any direct or indirect download links (GitHub, Kaggle, HuggingFace, or direct .zip/.tar.gz files) that may have been missed.
+    - EXCLUDE PDFs: Do not return any entry where the URL is a PDF file.
+    - REACH FOR DATA: Use the provided links and text to find the actual repository or download portal. If the current URL is just a summary, try to find the "External Link" or "Source" in the provided text/links.
+    - Extract as much information as possible from the provided text
+    - Be professional and concise in descriptions
+    - Do not hallucinate fields that aren't present; leave them empty or use 'unknown'
+    - Use the provided schema for the output
+
+    Always return a structured response with the synthesized dataset entry.
+
+  rescrape_human: |
+    Following is the scraped content from {url}. 
+    Please synthesize this into a structured dataset entry using the following fields: {db_string}
+
+    SCRAPED TEXT:
+    {scraped_text}

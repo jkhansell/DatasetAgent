@@ -10,24 +10,33 @@ from langchain.tools import tool
 
 from tavily import TavilyClient
 
-from utils import log_section, debug_state, debug_messages, load_jl, DatasetEntry, DatasetDiscoveryOutput, load_config
+from utils.logging import log_section, debug_state, debug_messages
+from utils.parsing import load_jl
+from utils.models import (
+    DatasetEntry, 
+    DatasetDiscoveryOutput, 
+    SourceClassification,
+    SourceClassificationOutput
+)
+from utils.config import load_config
 
 tavily = TavilyClient()
 config = load_config()
 
 @tool
-def search_datasets(query: str):
+def search_datasets(query: str, exclude_domains: List[str]):
     """
     Search for dataset-related links using a query string.
 
     Args:
         query (str): Search keywords describing the dataset.
+        exclude_domains (List[str]): Excluded domains in the search.
 
     Returns:
         List[str]: List of URLs returned by the search engine.
     """
     log_section("TOOL: search_datasets")
-    results = tavily.search(query)
+    results = tavily.search(query, exclude_domains=exclude_domains)
 
     return results
 
@@ -90,6 +99,7 @@ def scrape_website(url: str) -> dict:
 
     return {}
 
+
 # ==========================================
 # 3. LLM
 # ==========================================
@@ -113,9 +123,23 @@ discovery_agent = create_agent(
     response_format=ToolStrategy(DatasetDiscoveryOutput),
 )
 
+classification_agent = create_agent(
+    model=llm,
+    tools=[], # LLM classifies based on text provided by the graph
+    response_format=ToolStrategy(SourceClassificationOutput),
+)
+
 knowledge_agent = create_agent(
     model=llm,
     tools=[
         run_shell
+    ],
+)
+
+download_agent = create_agent(
+    model=llm,
+    tools=[
+        scrape_website,
+        run_shell,
     ],
 )

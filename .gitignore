@@ -211,3 +211,5 @@ data/*
 scripts/pid/*
 scripts/logs/*
 raw_output.txt
+logs/*
+pids/*

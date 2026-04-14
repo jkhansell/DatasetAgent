@@ -20,12 +20,15 @@ class DatasetSpider(scrapy.Spider):
     def parse(self, response):
         self.logger.info(f"Parsing: {response.url}")
 
-        # Extract links
+        # Extract links, filtering out PDFs and other binary formats
         links = response.css("a::attr(href)").getall()
         links = [urljoin(response.url, l) for l in links if l]
+        
+        excluded_exts = [".pdf", ".jpg", ".png", ".jpeg", ".mp4", ".doc", ".docx"]
+        links = [l for l in links if not any(l.lower().endswith(ext) for ext in excluded_exts)]
 
-        # Extract text content (clean)
-        paragraphs = response.css("p::text").getall()
+        # Extract text content (clean) - use more specific selectors for depth
+        paragraphs = response.css("p::text, h1::text, h2::text, h3::text, li::text").getall()
         text = " ".join(p.strip() for p in paragraphs if p.strip())
 
         # Extract metadata
@@ -36,6 +39,6 @@ class DatasetSpider(scrapy.Spider):
             "url": response.url,
             "title": title,
             "meta_description": meta_description,
-            "text": text[:10000],  # truncate for LLM
+            "text": text[:20000],  # balancing context and token usage
             "links": list(set(links)),  # deduplicate
         }
