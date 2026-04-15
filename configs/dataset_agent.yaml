@@ -3,10 +3,10 @@ llm:
   model_name: "gemma4-agent"
   temperature: 0.3
 
-target_sources: 10
+target_sources: 20
 max_steps: 50
 confidence_threshold: 0.7
-max_rescrape: 2
+max_rescrape: 10
 excluded_domains: ["github.com"]
 excluded_extensions: [".pdf", ".jpg", ".png", ".jpeg", ".mp4", ".doc", ".docx"]
 
@@ -39,7 +39,7 @@ prompts:
     - Prefer structured tool outputs over natural language
     - Be concise and focused strictly on discovery
 
-    Always return a structured response with the datasets you find in the structured format specified even if its just one!!!!
+    Always return a structured response with the datasets you find in the structured format.
 
   discovery_human: |
     Find at least {target_sources} leukocyte / white blood cell labeled datasets for segmentation, classification and identification.
@@ -82,54 +82,6 @@ prompts:
     Please provide a comprehensive summary per dataset showcasing key features make a comprehensive table. Include the URLs for revision 
     Write to a file under "git repo root"/data/summary.md.
 
-  classify: |
-    ROLE:
-    You are a source classification expert. Your goal is to determine how a dataset can be programmatically downloaded.
-
-    CONTEXT:
-    You will be given a URL, title, and description of a discovered dataset.
-    Identify the repository type and the specific handle/identifier needed for our tools.
-
-    RULES:
-    - TYPES: 
-        - 'kaggle': Needs a handle like 'user/dataset-name'.
-        - 'github': Needs the full repository URL.
-        - 'huggingface': Needs a repo ID like 'user/dataset'.
-        - 'direct_link': Needs the direct URL to a .zip, .csv, .tar.gz, etc.
-        - 'none': If it's not a dataset or not downloadable.
-    - If you are unsure, provide your best guess but lower the confidence score.
-
-  classify_human: |
-    Classify the following discovered sources for programmatic download:
-    {sources}
-
-  download: |
-    ROLE:
-    You are an expert Download Engineer. Your goal is to figure out the best way to download a dataset and write robust code to perform the task.
-
-    TASK:
-    1. FIGURE OUT: Use `scrape_website` to find direct download links, API documentation, or repository instructions if the provided info is insufficient.
-    2. WRITE CODE: Generate a Python or Bash script that handles the entire download process.
-       - Use `kaggle`, `git`, `wget`, `curl`, or Python libraries like `requests`, `huggingface_hub`, `kagglehub`.
-       - The script should create necessary directories, download the files, and verify integrity if possible.
-    3. EXECUTE: Use `run_shell` to write the script to a file and then execute it.
-    4. POST-PROCESS: Ensure the script or additional commands handle unzipping/untaring and organize the files into the target directory.
-
-    RULES:
-    - ALWAYS download to the specific directory provided in the human message.
-    - Be autonomous: if one method fails (e.g., `wget` fails), try another (e.g., writing a Python script with `requests`).
-    - Return a clear breakdown of what you did, the code you wrote, and the final local path confirmed by file existence check.
-    - If you need credentials for Kaggle or HF, assume they are already configured in the environment.
-
-    Example workflow:
-    - `cat <<EOF > download.py ... EOF`
-    - `python3 download.py`
-    - Verify files exist.
-
-  download_human: |
-    Attempt to download the following classified sources:
-    {classifications}
-
   rescrape: |
     ROLE:
     You are a dataset characterization expert operating within a discovery system.
@@ -154,6 +106,8 @@ prompts:
   rescrape_human: |
     Following is the scraped content from {url}. 
     Please synthesize this into a structured dataset entry using the following fields: {db_string}
+
+    scrape only 2 websites per try so we don't overload the context window
 
     SCRAPED TEXT:
     {scraped_text}

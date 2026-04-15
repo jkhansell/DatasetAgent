@@ -39,6 +39,6 @@ class DatasetSpider(scrapy.Spider):
             "url": response.url,
             "title": title,
             "meta_description": meta_description,
-            "text": text[:20000],  # balancing context and token usage
+            "text": text[:10000],  # balancing context and token usage
             "links": list(set(links)),  # deduplicate
         }

@@ -63,7 +63,7 @@ def save_to_db(state):
                 dimensions, download_status, downloader_type, downloader_id,
                 local_path, confidence, rescrape_count
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             entry.iid, entry.url, entry.potential_urls, entry.title, entry.description, entry.repository,
             entry.task, entry.annotation_type, entry.source, entry.license_,

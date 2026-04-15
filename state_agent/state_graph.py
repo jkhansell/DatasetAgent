@@ -14,17 +14,12 @@ from utils.db import init_db, load_from_db, save_to_db
 # Import Nodes
 from nodes.discovery import discovery_node
 from nodes.extract import extract_kb_node
-from nodes.classify import classify_node
 from nodes.rescrape import rescrape_node
-from nodes.download import download_node
 from nodes.save import save_node
 
 # Import Routers
 from utils.routers import (
     discovery_router,
-    classify_router,
-    rescrape_router,
-    download_router,
     save_router
 )
 
@@ -63,9 +58,7 @@ builder.set_entry_point("discover")
 
 builder.add_node("discover", discovery_node)
 builder.add_node("extract_kb", extract_kb_node)
-builder.add_node("classify", classify_node)
 builder.add_node("rescrape", rescrape_node)
-builder.add_node("download", download_node)
 builder.add_node("save", save_node)
 
 builder.add_conditional_edges("discover", discovery_router, {
@@ -73,28 +66,12 @@ builder.add_conditional_edges("discover", discovery_router, {
     "save": "save",
 })
 
-builder.add_edge("extract_kb", "classify")
-
-builder.add_conditional_edges("classify", classify_router, {
-    "download": "download",
-    "rescrape": "rescrape",
-    "end": END
-})
-
-builder.add_conditional_edges("rescrape", rescrape_router, {
-    "save": "save"
-})
-
-builder.add_conditional_edges("download", download_router, {
-    "save": "save",
-    "end": END
-})
+builder.add_edge("rescrape", "save")
+builder.add_edge("extract_kb", "save")
 
 builder.add_conditional_edges("save", save_router, {
-    "extract_kb": "extract_kb",
-    "classify": "classify",
     "rescrape": "rescrape",
-    "download": "download",
+    "extract_kb": "extract_kb",
     "end": END
 })
 

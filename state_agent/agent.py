@@ -1,6 +1,6 @@
 from typing import List, Dict, Optional, TypedDict
 from typing import Union
-import subprocess, json, os
+import subprocess, json, os, uuid
 
 from langchain.agents import create_agent
 from langchain_openai import ChatOpenAI
@@ -14,9 +14,7 @@ from utils.logging import log_section, debug_state, debug_messages
 from utils.parsing import load_jl
 from utils.models import (
     DatasetEntry, 
-    DatasetDiscoveryOutput, 
-    SourceClassification,
-    SourceClassificationOutput
+    DatasetDiscoveryOutput
 )
 from utils.config import load_config
 
@@ -78,7 +76,7 @@ def scrape_website(url: str) -> dict:
     print(f"URL: {url}")
 
 
-    output_file = "temp_scrape.jl"
+    output_file = f"/tmp/temp_scrape_{uuid.uuid4()}.jl"
 
     cmd = f"scrapy runspider ./scripts/spider.py -a start_url={url} -o {output_file}"
     
@@ -123,23 +121,9 @@ discovery_agent = create_agent(
     response_format=ToolStrategy(DatasetDiscoveryOutput),
 )
 
-classification_agent = create_agent(
-    model=llm,
-    tools=[], # LLM classifies based on text provided by the graph
-    response_format=ToolStrategy(SourceClassificationOutput),
-)
-
 knowledge_agent = create_agent(
     model=llm,
     tools=[
         run_shell
-    ],
-)
-
-download_agent = create_agent(
-    model=llm,
-    tools=[
-        scrape_website,
-        run_shell,
     ],
 )

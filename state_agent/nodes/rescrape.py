@@ -5,7 +5,7 @@ from utils.parsing import load_jl
 from utils.config import load_config
 from langchain.messages import HumanMessage, SystemMessage
 from utils.types import DatasetState
-import os, subprocess
+import os, subprocess, uuid
 
 config = load_config()
 
@@ -20,11 +20,11 @@ def rescrape_node(state: DatasetState):
     max_rescrape = config.get("max_rescrape", 2)
     
     for iid, entry in sources.items():
-        if entry.download_status == "low_confidence" and entry.rescrape_count < max_rescrape:
+        if entry.rescrape_count < max_rescrape:
             print(f"🔍 Rescraping {entry.url} (Attempt {entry.rescrape_count + 1})")
             
             # Use scrape_website tool via subprocess or agent
-            output_file = f"temp_rescrape_{iid}.jl"
+            output_file = f"/tmp/temp_rescrape_{uuid.uuid4()}.jl"
             cmd = f"scrapy runspider ./scripts/spider.py -a start_url={entry.url} -o {output_file}"
             subprocess.run(cmd, shell=True, capture_output=True)
             
@@ -74,7 +74,6 @@ def rescrape_node(state: DatasetState):
                     entry.repository = synthesized_entry.repository or entry.repository
                     
                     entry.rescrape_count += 1
-                    entry.download_status = "pending" # Send back to classify
                     updated = True
                     print(f"✅ Synthesized metadata for {entry.title}")
                 else:

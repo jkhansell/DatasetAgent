@@ -1,4 +1,4 @@
-import pprint
+import pprint, uuid
 from langchain_core.messages import HumanMessage, SystemMessage
 from agent import discovery_agent
 from utils.db import db_string
@@ -6,6 +6,7 @@ from utils.logging import log_section
 from utils.parsing import extract_all_urls
 from utils.config import load_config
 from utils.types import DatasetState
+import os
 
 config = load_config()
 
@@ -34,7 +35,9 @@ def discovery_node(state: DatasetState):
     result = discovery_agent.invoke({"messages": messages})
 
     print("===== RAW OUTPUT =====")
-    with open("./raw_output.txt", "w") as f:
+    raw_output_file = f"./logs/raw_output_{uuid.uuid4()}.txt"
+    os.makedirs("./logs", exist_ok=True)
+    with open(raw_output_file, "w") as f:
         pprint.pprint(result, f)
 
     if "structured_response" in result:
