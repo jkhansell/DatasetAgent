@@ -1,12 +1,14 @@
+import os
 import sqlite3
+
 from langchain.agents import AgentState
 from typing import List, Dict, Optional, TypedDict, Any
 
-from DatasetAgent.db.db import init_db, load_db
+from DatasetAgent.db.db import init_db, load_db, DB_PATH
 from DatasetAgent.utils.embedder import get_embedder
 
 
-class State(AgentState):
+class DatasetState(AgentState):
 
     # =========================
     # DATABASE CONNECTION
@@ -20,12 +22,14 @@ class State(AgentState):
     phase: str                  # discovery | scraping | analysis | enrichment
     step_count: int
     max_steps: int
+    rescrape_step_count: int
     target_sources: int
+    current_sources: int
 
     # =========================
     # CURRENT TASK CONTEXT
     # =========================
-    dataset_goal: Optional[str]  # what we are trying to find
+    dataset_goal: Optional[str]  # ww ehat we are trying to find
 
     # =========================
     # DISCOVERY OUTPUTS
@@ -51,16 +55,21 @@ class State(AgentState):
     scratchpad: Dict[str, Any]    # ephemeral reasoning
 
     # =========================
+    # SUMMARY OUTPUTS
+    # =========================
+    final_summary: str
+
+    # =========================
     # EMBEDDING MODEL
     # =========================
     embedder: Any
 
-    config: Dict
+    config: Any
 
 
 def init_state(
     config,
-) -> State:
+) -> DatasetState:
     """
     Initialize agent runtime state.
     """
@@ -79,14 +88,18 @@ def init_state(
         # Core
         "db": db,
         "embedder": embedder,
+        "config": config,
 
         # Control flow
         "phase": "discovery",
         "step_count": 0,
         "max_steps": config["max_steps"],
+        "rescrape_step_count": 0,
 
         # Current objective
         "dataset_goal": config["dataset_goal"],
+        "target_sources": config["target_sources"],
+        "current_sources": 0,
 
         # Discovery outputs
         "search_ids": [],
@@ -99,6 +112,9 @@ def init_state(
         # Analysis outputs
         "matched_dataset_ids": [],
         "new_dataset_ids": [],
+
+        # Summary output
+        "final_summary": "",
 
         # Working memory
         "scratchpad": {

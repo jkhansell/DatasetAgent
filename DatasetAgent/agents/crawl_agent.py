@@ -12,11 +12,11 @@ from langchain.messages import ToolMessage, AIMessage, HumanMessage, SystemMessa
 from langchain.tools import tool
 
 
-from DatasetAgent.utils.logging import log_section, debug_state, debug_messages
+from DatasetAgent.utils.logging import log_section, debug_state, debug_messages, get_logger
 from DatasetAgent.utils.parsing import load_jl
-from DatasetAgent.utils.config import load_config
 
-config = load_config()
+logger = get_logger(__name__)
+
 
 # ==========================================
 # Structured Output Schema
@@ -67,7 +67,7 @@ class Observation(BaseModel):
 def scrape_website(
     url: str,
     max_pages: int = 7,
-    min_score: int = 3,
+    min_score: int = 1,
     timeout: int = 60
 ) -> List[Dict]:
     """
@@ -77,14 +77,14 @@ def scrape_website(
     """
 
     log_section("TOOL: scrape_website")
-    print(f"URL: {url}")
+    logger.info(f"URL: {url}")
 
     output_file = f"/tmp/scrape_{uuid.uuid4()}.jl"
 
     cmd = [
         "scrapy",
         "runspider",
-        "./scripts/dataset_discovery_spider.py",
+        "./scripts/spider.py",
         "-a", f"start_url={url}",
         "-a", f"max_pages={max_pages}",
         "-o", output_file,
@@ -100,12 +100,12 @@ def scrape_website(
         )
 
     except subprocess.TimeoutExpired:
-        print("Scraping timed out")
+        logger.warning("Scraping timed out")
         return []
 
     except subprocess.CalledProcessError as e:
-        print("Scraping failed")
-        print(e.stderr[:1000] if e.stderr else "")
+        logger.error("Scraping failed")
+        logger.error(e.stderr[:1000] if e.stderr else "")
         return []
 
     if not os.path.exists(output_file):
@@ -139,17 +139,11 @@ def scrape_website(
 
         seen.add(url_)
 
-        score = row.get("score", 0)
-
-        if score < min_score:
-            continue
-
         cleaned.append({
             "url": url_,
             "title": row.get("title"),
             "description": row.get("description"),
             "entity_type": row.get("entity_type", "generic"),
-            "score": score,
             "downloads": row.get("downloads", []),
             "jsonld": row.get("jsonld", []),
             "headings": row.get("headings", []),
@@ -157,7 +151,6 @@ def scrape_website(
 
     cleaned.sort(
         key=lambda x: (
-            x["score"],
             len(x.get("downloads", [])),
             len(x.get("jsonld", []))
         ),
@@ -166,20 +159,10 @@ def scrape_website(
 
     cleaned = cleaned[:max_pages]
 
-    print(f"Returned {len(cleaned)} ranked pages (from {len(data)})")
+    logger.info(f"Returned {len(cleaned)} ranked pages (from {len(data)})")
 
     return cleaned
 
-
-# ==========================================
-# LLM
-# ==========================================
-llm = ChatOpenAI(
-    base_url=config["llm"]["base_url"],
-    api_key="EMPTY",
-    model=config["llm"]["model_name"],
-    temperature=config["llm"]["temperature"],
-)
 # ==========================================
 # AGENT
 # ==========================================
