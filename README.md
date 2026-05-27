@@ -77,3 +77,12 @@ python main.py --target 20
 - `configs/`: YAML configuration for prompts and goals.
 - `scripts/`: Infrastructure scripts for vLLM and housekeeping.
 - `data/`: Local storage for the SQLite database and generated summaries.
+
+
+1. discover()
+2. crawl()
+3. extract_entities()
+4. resolve_identity()
+5. update_graph()
+6. expand_frontier()
+→ repeat

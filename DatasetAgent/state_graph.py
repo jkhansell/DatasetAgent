@@ -7,18 +7,16 @@ load_dotenv()
 from typing import Dict
 from langgraph.graph import StateGraph, END
 
-from DatasetAgent.utils.types import DatasetState
+from DatasetAgent.agents.state import DatasetState
 
 from DatasetAgent.db.db import init_db, load_db, save_db, DB_PATH
 
 # Import Nodes
 from DatasetAgent.nodes.discovery import discovery_node
 from DatasetAgent.nodes.crawl_extract import crawl_extract_node
-
-# Import Routers
-from DatasetAgent.nodes.routers import (
-    end_router
-)
+from DatasetAgent.nodes.resolve_datasets import resolve_datasets_node
+from DatasetAgent.nodes.summary import summary_node
+from DatasetAgent.nodes.routers import end_router
 
 # ==========================================
 # 2. GRAPH CONSTRUCTION
@@ -32,11 +30,23 @@ def build_graph():
 
     builder.add_node("discover", discovery_node)
     builder.add_node("crawl_extract", crawl_extract_node)
+    builder.add_node("resolve_datasets", resolve_datasets_node)
+    builder.add_node("summary", summary_node)
 
     builder.add_edge("discover", "crawl_extract")
+    builder.add_edge("crawl_extract", "resolve_datasets")
+    builder.add_conditional_edges(
+        "resolve_datasets",
+        end_router,
+        {
+            "loop": "discover",
+            "rescrape": "crawl_extract",
+            "summary": "summary"
+        }
+    )
 
-
-    builder.set_finish_point("crawl_extract")
+    builder.add_edge("summary", END)
+    builder.set_finish_point("summary")
 
     graph = builder.compile()
 

@@ -4,6 +4,8 @@ set -euo pipefail
 
 export ROOT=$(git rev-parse --show-toplevel)
 
+export VLLM_USE_FLA=0
+
 source $ROOT/.env
 source $ROOT/.venv/bin/activate
 
@@ -112,14 +114,14 @@ case "$ACTION" in
   start_process "vllm" "
 vllm serve Qwen/Qwen3.5-9B \
   --port $VLLM_PORT \
-  --max-model-len 100K \
+  --max-model-len 32K \
   --enable-auto-tool-choice \
   --tool-call-parser qwen3_coder \
   --reasoning-parser qwen3 \
   --tensor-parallel-size 1 \
-  --gpu-memory-utilization 0.925 \
+  --gpu-memory-utilization 0.70 \
   --served-model-name gemma4-agent \
-  --dtype auto
+  --dtype bfloat16
 " $VLLM_PORT
 
 #  start_process "langgraph" "
