@@ -1,6 +1,11 @@
 import os
 import sqlite3
 import sqlite_vec
+import numpy as np
+from urllib.parse import urlparse, urlunparse
+from DatasetAgent.utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 DB_PATH = "data/datasets.db"
 
@@ -21,7 +26,7 @@ def load_db(path: str = DB_PATH) -> sqlite3.Connection:
     db.execute("PRAGMA foreign_keys = ON;")
     db.execute("PRAGMA journal_mode = WAL;")
     db.execute("PRAGMA synchronous = NORMAL;")
-,
+
     return db
 
 
@@ -102,31 +107,30 @@ def init_db(path: str = DB_PATH, dim: int = 768):
 
         doi TEXT,
         license_ TEXT,
+        publisher TEXT,
+        access_level TEXT,
+        keywords TEXT,
 
         date_created DATETIME DEFAULT CURRENT_TIMESTAMP,
         last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
 
         paper_url TEXT,
         code_url TEXT,
+        dataset_url TEXT,
 
         potential_download_urls TEXT,
 
-        embedding_title FLOAT[{dim}] CHECK(
-            typeof(embedding_title) = 'blob'
-            AND vec_length(embedding_title) = {dim}
-        ),
-
-        embedding_description FLOAT[{dim}] CHECK(
-            typeof(embedding_description) = 'blob'
-            AND vec_length(embedding_description) = {dim}
+        embedding_title_desc FLOAT[{dim}] CHECK(
+            typeof(embedding_title_desc) = 'blob'
+            AND vec_length(embedding_title_desc) = {dim}
         )
     );
 
-    CREATE INDEX IF NOT EXISTS idx_datasets_title
-    ON datasets(title);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_datasets_title
+    ON datasets(title) WHERE title IS NOT NULL;
 
-    CREATE INDEX IF NOT EXISTS idx_datasets_doi
-    ON datasets(doi);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_datasets_doi
+    ON datasets(doi) WHERE doi IS NOT NULL;
 
     -- ==================================================
     -- OBSERVATIONS (runtime extracted entities)
@@ -152,19 +156,21 @@ def init_db(path: str = DB_PATH, dim: int = 768):
 
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 
-        embedding_title FLOAT[{dim}] CHECK(
-            typeof(embedding_title) = 'blob'
-            AND vec_length(embedding_title) = {dim}
-        ),
-
-        embedding_description FLOAT[{dim}] CHECK(
-            typeof(embedding_description) = 'blob'
-            AND vec_length(embedding_description) = {dim}
+        embedding_title_desc FLOAT[{dim}] CHECK(
+            typeof(embedding_title_desc) = 'blob'
+            AND vec_length(embedding_title_desc) = {dim}
         ),
 
         FOREIGN KEY(source_id) REFERENCES sources(id) ON DELETE CASCADE,
         FOREIGN KEY(matched_dataset) REFERENCES datasets(id)
     );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_obs_unique_doi
+    ON observations(doi)
+    WHERE doi IS NOT NULL;
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_obs_unique_title
+    ON observations(title);
 
     CREATE INDEX IF NOT EXISTS idx_obs_source
     ON observations(source_id);
@@ -174,10 +180,12 @@ def init_db(path: str = DB_PATH, dim: int = 768):
 
     CREATE INDEX IF NOT EXISTS idx_obs_status
     ON observations(status);
+    
     """)
 
     db.commit()
-    db.close()
+
+    return db
 
 # =====================================================
 # WRITE FUNCTIONS
@@ -193,12 +201,12 @@ def insert_search(
     cur.execute("""
         INSERT INTO searches (
             query,
-            topic,
+            topic
         )
         VALUES (?, ?)
     """, (
         query,
-        topic,
+        topic
     ))
 
     db.commit()
@@ -223,6 +231,11 @@ def insert_source(
     Insert source if unseen.
     Returns id.
     """
+    
+    if url:
+        parsed = urlparse(url)
+        url = urlunparse((parsed.scheme.lower(), parsed.netloc.lower(), parsed.path.rstrip('/'), parsed.params, parsed.query, ''))
+
     cur = db.cursor()
 
     cur.execute("""
@@ -263,50 +276,23 @@ def insert_source(
 
     return cur.fetchone()["id"]
 
-
-def insert_dataset(
-    db,
-    title: str,
-    description: str = None,
-    doi: str = None,
-    license_: str = None,
-    paper_url: str = None,
-    code_url: str = None,
-    potential_download_urls: str = None,
-    embedding_title = None,
-    embedding_description = None
-) -> int:
+def update_source_status(db, source_id: int, processed: int, crawl_status: str):
     cur = db.cursor()
-
     cur.execute("""
-        INSERT INTO datasets (
-            title,
-            description,
-            doi,
-            license_,
-            paper_url,
-            code_url,
-            potential_download_urls,
-            embedding_title,
-            embedding_description
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        title,
-        description,
-        doi,
-        license_,
-        paper_url,
-        code_url,
-        potential_download_urls,
-        embedding_title,
-        embedding_description
-    ))
-
+        UPDATE sources
+        SET processed = ?, crawl_status = ?
+        WHERE id = ?
+    """, (processed, crawl_status, source_id))
     db.commit()
 
-    return cur.lastrowid
-
+def update_observation_status(db, obs_id: int, status: str):
+    cur = db.cursor()
+    cur.execute("""
+        UPDATE observations
+        SET status = ?
+        WHERE id = ?
+    """, (status, obs_id))
+    db.commit()
 
 def insert_observation(
     db,
@@ -316,13 +302,20 @@ def insert_observation(
     description: str = None,
     license_: str = None,
     doi: str = None,
+    publisher: str = None,
+    access_level: str = None,
+    keywords: str = None,
     matched_dataset: int = None,
     confidence: float = 0.0,
     status: str = "new",
-    embedding_title = None,
-    embedding_description = None
+    embedding_title_desc = None,
 ) -> int:
     cur = db.cursor()
+
+    cur.execute("SELECT id FROM observations WHERE source_id = ? AND LOWER(title) = LOWER(?)", (source_id, title))
+    existing = cur.fetchone()
+    if existing:
+        return existing["id"]
 
     cur.execute("""
         INSERT INTO observations (
@@ -333,12 +326,14 @@ def insert_observation(
             description,
             license_,
             doi,
+            publisher,
+            access_level,
+            keywords,
             confidence,
             status,
-            embedding_title,
-            embedding_description
+            embedding_title_desc
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         source_id,
         matched_dataset,
@@ -347,15 +342,253 @@ def insert_observation(
         description,
         license_,
         doi,
+        publisher,
+        access_level,
+        keywords,
         confidence,
         status,
-        embedding_title,
-        embedding_description
+        embedding_title_desc
     ))
 
     db.commit()
 
     return cur.lastrowid
+
+def create_dataset(db, obs_id):
+    """
+    Create a new dataset from a single observation
+    (seed step for emergent dataset formation).
+    """
+
+    cur = db.cursor()
+
+    # -------------------------------------------------
+    # 1. Fetch observation
+    # -------------------------------------------------
+    cur.execute("""
+        SELECT title, description, doi, license_, publisher,
+               access_level, keywords, embedding_title_desc
+        FROM observations
+        WHERE id = ?
+    """, (obs_id,))
+
+    row = cur.fetchone()
+
+    if not row:
+        return None
+
+    title, desc, doi, license_, publisher, access_level, keywords, emb = row
+
+    existing = None
+    if doi:
+        cur.execute("SELECT id FROM datasets WHERE doi = ?", (doi,))
+        existing = cur.fetchone()
+        
+    if not existing:
+        cur.execute("SELECT id FROM datasets WHERE LOWER(title) = LOWER(?)", (title,))
+        existing = cur.fetchone()
+    
+    if existing:
+        dataset_id = existing["id"]
+    else:
+        # -------------------------------------------------
+        # 2. Create dataset (seeded from observation)
+        # -------------------------------------------------
+        cur.execute("""
+            INSERT INTO datasets (
+                title,
+                description,
+                doi,
+                license_,
+                publisher,
+                access_level,
+                keywords,
+                embedding_title_desc
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            title,
+            desc,
+            doi,
+            license_,
+            publisher,
+            access_level,
+            keywords,
+            emb
+        ))
+    
+        dataset_id = cur.lastrowid
+
+    # -------------------------------------------------
+    # 3. Attach observation
+    # -------------------------------------------------
+    cur.execute("""
+        UPDATE observations
+        SET matched_dataset = ?, status = 'resolved'
+        WHERE id = ?
+    """, (dataset_id, obs_id))
+
+    db.commit()
+
+    return dataset_id
+
+def merge_text(old, new):
+    if not old:
+        return new
+    if not new:
+        return old
+    if new in old:
+        return old
+    return old + "\n" + new
+
+def merge_keywords(old, new):
+    old_set = set((old or "").split("|")) if old else set()
+    new_set = set(new or [])
+
+    return "|".join(sorted(old_set | new_set))
+
+def merge_url(old, new):
+    if not old:
+        return new
+    if not new:
+        return old
+
+    urls = set(old.split("|"))
+    urls.add(new)
+
+    return "|".join(urls)
+
+def update_centroid(old_blob, new_array, alpha=0.2, conf=1.0):
+    if old_blob is None:
+        return new_array
+    
+    old_array = np.frombuffer(old_blob, dtype=np.float32)
+    updated = (1 - alpha) * old_array + alpha * new_array * conf
+    return updated.astype(np.float32).tobytes()
+
+def update_dataset_from_observation(db, dataset_id, obs_id, embedder):
+    """
+    Enrich an existing dataset using a new observation.
+    """
+
+    cur = db.cursor()
+
+    # -------------------------------------------------
+    # 0. Fetch observation (MISSING in your version)
+    # -------------------------------------------------
+    cur.execute("""
+        SELECT title, description, doi, license_, publisher,
+               access_level, keywords, embedding_title_desc
+        FROM observations
+        WHERE id = ?
+    """, (obs_id,))
+
+    obs_row = cur.fetchone()
+
+    if not obs_row:
+        return None
+
+    (obs_title, obs_desc, obs_doi, obs_license,
+     obs_publisher, obs_access, obs_keywords, obs_emb) = obs_row
+
+    obs = type("Obs", (), {})()  # lightweight object
+    obs.title = obs_title
+    obs.description = obs_desc
+    obs.doi = obs_doi
+    obs.license_ = obs_license
+    obs.publisher = obs_publisher
+    obs.access_level = obs_access
+    obs.keywords = obs_keywords
+    obs.embedding_title_desc = obs_emb
+
+    # -------------------------------------------------
+    # 1. Fetch dataset state
+    # -------------------------------------------------
+    cur.execute("""
+        SELECT title, description, doi, license_, publisher,
+               access_level, keywords, embedding_title_desc,
+               paper_url, code_url, dataset_url
+        FROM datasets
+        WHERE id = ?
+    """, (dataset_id,))
+
+    ds = cur.fetchone()
+
+    if not ds:
+        return None
+
+    (title, desc, doi, license_, publisher,
+     access_level, keywords, emb,
+     paper_url, code_url, dataset_url) = ds
+
+    # -------------------------------------------------
+    # 2. Field-level enrichment
+    # -------------------------------------------------
+    new_title = title or obs.title
+    new_desc = merge_text(desc, obs.description)
+
+    new_doi = doi or obs.doi
+    new_license = license_ or obs.license_
+    new_publisher = publisher or obs.publisher
+    new_access = access_level or obs.access_level
+
+    new_keywords = merge_keywords(keywords, obs.keywords)
+
+    new_paper_url = paper_url
+    new_code_url = code_url
+    new_dataset_url = dataset_url
+
+    # -------------------------------------------------
+    # 3. Embedding update (centroid)
+    # -------------------------------------------------
+    new_emb = update_centroid(emb, np.frombuffer(obs.embedding_title_desc, dtype=np.float32))
+
+    # -------------------------------------------------
+    # 4. Persist update
+    # -------------------------------------------------
+    cur.execute("""
+        UPDATE datasets
+        SET title = ?,
+            description = ?,
+            doi = ?,
+            license_ = ?,
+            publisher = ?,
+            access_level = ?,
+            keywords = ?,
+            paper_url = ?,
+            code_url = ?,
+            dataset_url = ?,
+            embedding_title_desc = ?,
+            last_updated = CURRENT_TIMESTAMP
+        WHERE id = ?
+    """, (
+        new_title,
+        new_desc,
+        new_doi,
+        new_license,
+        new_publisher,
+        new_access,
+        new_keywords,
+        new_paper_url,
+        new_code_url,
+        new_dataset_url,
+        new_emb,
+        dataset_id
+    ))
+
+    # -------------------------------------------------
+    # 5. Attach observation
+    # -------------------------------------------------
+    cur.execute("""
+        UPDATE observations
+        SET matched_dataset = ?, status = 'resolved'
+        WHERE id = ?
+    """, (dataset_id, obs_id))
+
+    db.commit()
+
+    return dataset_id
+
 
 # =====================================================
 # READ FUNCTIONS
@@ -365,7 +598,8 @@ def get_sources(
     db,
     urls_only: bool = True,
     limit: int = 25,
-    only_pending: bool = True
+    only_pending: bool = True,
+    for_rescrape: bool = False
 ) -> list:
     """
     Retrieve sources for crawl/extract pipeline.
@@ -376,7 +610,10 @@ def get_sources(
     where = []
     params = []
 
-    if only_pending:
+    if for_rescrape:
+        where.append("processed = 1")
+        where.append("crawl_status = 'scraped'")
+    elif only_pending:
         where.append("processed = 0")
         where.append("crawl_status IN ('new', 'retry')")
 
@@ -423,10 +660,93 @@ def get_sources(
     cols = [d[0] for d in cur.description]
     return [dict(zip(cols, row)) for row in rows]
 
+def get_observations(db, doi=None, title=None, limit=None):
+    """
+    Flexible observation fetch:
+    - by DOI
+    - by title
+    - or bulk (for similarity scan)
+    """
+
+    cur = db.cursor()
+
+    # ---- Case 1: DOI lookup
+    if doi is not None:
+        cur.execute("""
+            SELECT *
+            FROM observations
+            WHERE doi = ?
+            LIMIT 1
+        """, (doi,))
+        rows = cur.fetchall()
+        return [dict(r) for r in rows]
+
+    # ---- Case 2: Title lookup
+    if title is not None:
+        cur.execute("""
+            SELECT *
+            FROM observations
+            WHERE title = ?
+            LIMIT 1
+        """, (title,))
+        rows = cur.fetchall()
+        return [dict(r) for r in rows]
+
+    # ---- Case 3: Bulk fetch (for embedding similarity)
+    query = "SELECT * FROM observations ORDER BY created_at DESC"
+    if limit:
+        query += f" LIMIT {int(limit)}"
+
+    cur.execute(query)
+    rows = cur.fetchall()
+
+    results = []
+    for r in rows:
+        d = dict(r)
+
+        # ---- IMPORTANT: convert embedding from blob → numpy
+        if d.get("embedding_title_desc") is not None:
+            d["embedding_title_desc"] = np.frombuffer(
+                d["embedding_title_desc"], dtype=np.float32
+            )
+
+        results.append(d)
+
+    return results
+
+def get_datasets(db) -> list:
+    """
+    Retrieve all recorded datasets.
+    """
+    cur = db.cursor()
+    cur.execute("""
+        SELECT
+            id,
+            title,
+            description,
+            doi,
+            license_,
+            publisher,
+            access_level,
+            keywords,
+            paper_url,
+            code_url,
+            dataset_url
+        FROM datasets
+    """)
+    rows = cur.fetchall()
+    
+    # Check if empty
+    if not rows:
+        return []
+
+    cols = [d[0] for d in cur.description]
+    return [dict(zip(cols, row)) for row in rows]
+
 # =====================================================
 # EXAMPLE USAGE
 # =====================================================
 
 if __name__ == "__main__":
     init_db()
-    print("Database initialized.")
+    logger.info("✅ Database initialized.")

@@ -1,15 +1,18 @@
-from langgraph.graph import END
-from DatasetAgent.utils.types import DatasetState
-from DatasetAgent.utils.config import load_config
-
-config = load_config()
+from DatasetAgent.agents.state import DatasetState
 
 def end_router(state: DatasetState):
-    if state["step_count"] >= state["max_steps"]:
-        return END
-    
-    if len(state["sources"]) >= state["target_sources"]:
-        return END
+    config = state.get("config", {})
+    max_rescrape = config.get("rescrape_steps", 0)
+    target_sources = config.get("target_sources", 5)
 
-    return "discover"
+    if state["step_count"] < state["max_steps"]: 
+        if state["current_sources"] <= target_sources:
+            return "summary"
+        else:
+            return "loop"
+    
+    if state["rescrape_step_count"] < max_rescrape and state["step_count"] >= state["max_steps"]:
+        return "rescrape"
+
+    return "summary"
 

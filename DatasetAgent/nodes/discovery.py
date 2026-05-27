@@ -6,16 +6,17 @@ import sqlite3
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from DatasetAgent.agents.discovery_agent import build_agent
+from DatasetAgent.agents.prompts import DISCOVERY_SYSTEM
+from DatasetAgent.agents.state import DatasetState
 
-from DatasetAgent.db.db import insert_search, insert_source
+from DatasetAgent.db.db import insert_search, insert_source, get_sources
 
 
 from DatasetAgent.utils.llm import get_LLM
-from DatasetAgent.utils.logging import log_section
-from DatasetAgent.utils.config import load_config
-from DatasetAgent.utils.types import DatasetState
+from DatasetAgent.utils.logging import log_section, get_logger
 from DatasetAgent.utils.url import infer_source_type
 
+logger = get_logger(__name__)
 
 from tavily import TavilyClient
 
@@ -32,7 +33,21 @@ def discovery_node(state: DatasetState):
     log_section("NODE: DISCOVERY")
     state["phase"] = "discovery"
 
-    config = state.config
+
+    sources = get_sources(
+        state["db"],
+        urls_only=True,
+        limit=state["target_sources"],
+        only_pending=False
+    )
+
+    if len(sources) >= state["target_sources"]:
+        logger.info("✅ Target sources reached")
+        return {
+            "phase": "discovery"
+        }
+
+    config = state["config"]
 
     llm = get_LLM(
         base_url=config["llm"]["base_url"],
@@ -45,16 +60,23 @@ def discovery_node(state: DatasetState):
     # ==================================================
     # 1. Generate queries (single LLM call)
     # ==================================================
+    
+    # Fetch existing urls from DB to avoid duplicates
+    existing_urls = get_sources(state["db"], urls_only=True, limit=1000, only_pending=False)
     messages = [
-        SystemMessage(content=config["prompts"]["discovery"]),
+        SystemMessage(content=DISCOVERY_SYSTEM.format(
+            urls="\n".join(existing_urls),
+            candidate_urls="\n".join(state.get("candidate_urls", []))
+        )),
         HumanMessage(
             content=config["prompts"]["discovery_human"].format(
                 target_sources=state["target_sources"],
-                dataset_goal=state["dataset_goal"]
+                dataset_goal=state["dataset_goal"],
             )
         )
     ]
 
+    logger.info("⏳ Agent is thinking (discovery)...")
     query_result = query_agent.invoke({"messages": messages})
 
     search_ids = []
@@ -71,7 +93,7 @@ def discovery_node(state: DatasetState):
 
             # Save search lineage
             search_id = insert_search(
-                state.db,
+                state["db"],
                 query=entry.query,
                 topic=entry.topic
             )
@@ -87,7 +109,7 @@ def discovery_node(state: DatasetState):
                     continue
 
                 source_id = insert_source(
-                    db=state.db,
+                    db=state["db"],
                     search_id=search_id,
                     url=url,
                     webdomain=extract_domain(url),
@@ -106,5 +128,6 @@ def discovery_node(state: DatasetState):
         "search_ids": search_ids,
         "source_ids": source_ids,
         "candidate_urls": list(candidate_urls),
+        "current_sources": len(sources),
         "phase": "discovery"
     }
