@@ -7,13 +7,13 @@ import uuid
 from langchain_core.messages import HumanMessage, SystemMessage
 from SPARQLWrapper import SPARQLWrapper, JSON
 
-from DatasetAgent.agents.discovery_agent import build_agent
-from DatasetAgent.agents.prompts import DISCOVERY_SYSTEM
-from DatasetAgent.agents.state import DatasetState
-from DatasetAgent.db.db import get_sources, insert_search, insert_source
-from DatasetAgent.utils.llm import get_LLM
-from DatasetAgent.utils.logging import get_logger, log_section
-from DatasetAgent.utils.url import infer_source_type
+from dataset_agent.agents.discovery_agent import build_agent
+from dataset_agent.agents.prompts import DISCOVERY_SYSTEM
+from dataset_agent.agents.state import DatasetState
+from dataset_agent.db.db import get_sources, insert_search, insert_source
+from dataset_agent.utils.llm import get_LLM
+from dataset_agent.utils.logging import get_logger, log_section
+from dataset_agent.utils.url import infer_source_type
 
 logger = get_logger(__name__)
 
@@ -21,24 +21,24 @@ from tavily import TavilyClient
 
 tavily = TavilyClient()
 
-def _cache_key_for_qids(qids: list) -> str:
+def _cache_key_for_qids(qids: list[str]) -> str:
     """Derive a deterministic cache filename from a list of Wikidata QIDs."""
     safe_qids = "".join(q.replace("Q", "") for q in qids)
     return f"wikidata_ontology_{safe_qids}.json"
 
 
 def fetch_wikidata_ontology(
-    qids: list,
-    cache_file: str = None,
+    qids: list[str],
+    cache_file: str | None = None,
     user_agent: str = "DatasetAgent/1.0",
-) -> list:
+) -> list[dict]:
     """
     Fetch the full P279 (subclass of) ontology hierarchy for a list of
     Wikidata QIDs, caching the result locally to avoid repeated queries.
 
     Parameters
     ----------
-    qids : list
+    qids : list[str]
         Wikidata entity IDs to root the hierarchy search under
         (e.g. ``["Q42395"]`` for leukocytes, or any other set).
     cache_file : str, optional
@@ -49,7 +49,7 @@ def fetch_wikidata_ontology(
 
     Returns
     -------
-    list
+    list[dict]
         A list of ``{"child_label": ..., "parent_label": ...}`` pairs
         representing the ontology hierarchy.
     """
@@ -86,7 +86,7 @@ def fetch_wikidata_ontology(
 
     try:
         results = sparql.query().convert()
-        ontology_pairs = []
+        ontology_pairs: list[dict] = []
 
         for result in results["results"]["bindings"]:
             child = result["cellLabel"]["value"]
@@ -116,8 +116,7 @@ def fetch_wikidata_ontology(
         # Return empty list so the pipeline never stalls completely
         return []
 
-
-def fetch_leukocyte_ontology():
+def fetch_leukocyte_ontology() -> list[dict]:
     """
     Backwards-compatible wrapper: fetch leukocyte ontology (Q42395).
 
@@ -128,6 +127,7 @@ def fetch_leukocyte_ontology():
         qids=["Q42395"],
         user_agent="LeukoCoDatasetCurator/1.0 (mailto:your_email@example.com)",
     )
+
 
 def extract_domain(url: str) -> str:
     try:
@@ -147,7 +147,7 @@ def discovery_node(state: DatasetState):
     )
 
     if len(sources) >= state["target_sources"]:
-        logger.info("✅ Target sources reached")
+        logger.info("Target sources reached")
         return {
             "phase": "discovery"
         }
@@ -159,7 +159,7 @@ def discovery_node(state: DatasetState):
     # ==================================================
     wikidata_qids = config.get("wikidata_qids", ["Q42395"])
     ontology_nodes = fetch_wikidata_ontology(qids=wikidata_qids)
-    
+
     # Flatten unique concepts out to pass into your system instructions
     unique_concepts = list(set([node["child_label"] for node in ontology_nodes] + [node["parent_label"] for node in ontology_nodes]))
 
@@ -175,13 +175,13 @@ def discovery_node(state: DatasetState):
     # 1. Generate queries (single LLM call)
     # ==================================================
     existing_urls = get_sources(state["db"], urls_only=True, limit=1000, only_pending=False)
-    
+
     # Inject both existing URLs and our explicit, structural ontology terms
     system_prompt = DISCOVERY_SYSTEM.format(
         urls="\n".join(existing_urls),
         candidate_urls="\n".join(state.get("candidate_urls", []))
     )
-    
+
     # Append the structural guide directly to the system prompt context
     system_prompt += f"\n\nAvailable Target Ontology Knowledge Base Concepts:\n" + ", ".join(unique_concepts[:150]) # Capped variant safe for contexts
 
@@ -195,7 +195,7 @@ def discovery_node(state: DatasetState):
         )
     ]
 
-    logger.info("⏳ Agent is thinking (discovery)...")
+    logger.info("Agent is thinking (discovery)...")
     query_result = query_agent.invoke({"messages": messages})
 
     search_ids = []
